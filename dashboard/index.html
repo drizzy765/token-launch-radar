@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Launch Radar — pre-token FDV board</title>
+<link rel="stylesheet" href="app.css"/>
+</head>
+<body>
+<header class="top">
+  <div class="brand">
+    <span class="mark">LR</span>
+    <div>
+      <h1>Launch Radar</h1>
+      <p class="sub" id="headline">Loading sealed DefiLlama snapshot…</p>
+    </div>
+  </div>
+  <div class="meta" id="meta"></div>
+</header>
+<section class="model-bar" id="modelBar"></section>
+<main class="layout">
+  <aside class="filters" id="filters">
+    <h2>Filters</h2>
+    <label>Search<input type="search" id="q" placeholder="name or slug" autocomplete="off"/></label>
+    <label>Category<select id="cat"><option value="">All categories</option></select></label>
+    <label>Chain<select id="chain"><option value="">All chains</option></select></label>
+    <label class="check"><input type="checkbox" id="watchOnly"/> Watchlist only</label>
+    <label>Min TVL (USD)<input type="number" id="minTvl" min="0" step="1000000" value="0"/></label>
+    <label>Sort<select id="sort">
+      <option value="rank">Rank (implied value)</option>
+      <option value="tvl">TVL</option>
+      <option value="growth">7d growth</option>
+      <option value="multiple">Category multiple</option>
+      <option value="age">Age</option>
+    </select></label>
+    <button type="button" id="reset">Reset filters</button>
+    <p class="hint" id="count"></p>
+  </aside>
+  <section class="board-wrap">
+    <table class="board" id="board">
+      <thead>
+        <tr>
+          <th>#</th><th>Protocol</th><th>Category</th><th>TVL</th><th>7d</th><th>Implied FDV</th><th>Why</th>
+        </tr>
+      </thead>
+      <tbody id="tbody"></tbody>
+    </table>
+  </section>
+  <aside class="detail" id="detail">
+    <p class="empty">Select a protocol to see the model breakdown and farm plan.</p>
+  </aside>
+</main>
+<script src="../data.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
