@@ -8,15 +8,14 @@ Launch Radar ranks DefiLlama protocols that do not yet have a token by an implie
 
 ## Model
 
-Implied FDV =
+Implied value = TVL × category multiple × growth × age × chain breadth, in whole dollars.
 
-1. **Size** — soft-log of TVL (`TVL² / (TVL + $25M)`) so mega pools do not dominate linearly
-2. **Category multiple** — median live FDV/TVL for that DefiLlama category (clamped), else a default 0.32×
-3. **Growth** — 7-day TVL change, clamped, weighted into a multiplier
-4. **Longevity** — days since listing without a token (airdrop-maturity curve)
-5. **Chain breadth** — multi-chain and L1 premiums
+1. **Multiple** — median market cap ÷ TVL of protocols in the same category that already record a token. Ratios are clamped to the global 10th–90th percentile. A category median is used only when at least 6 of those tokens exist; a thinner sample is shown and the global median is used instead.
+2. **Growth** — `1 + 0.006 ×` the 7-day TVL change in percent, clamped to −20 and +35. A missing change stays 1.
+3. **Age** — `0.68 + 0.42 × (1 − exp(−years / 1.5))`, with years measured from `listed_at` to the snapshot. A missing date uses 0.75.
+4. **Chains** — `1 + 0.03 ×` extra chains, capped at 12.
 
-The sealed snapshot’s watchlist is always covered; additional early (below-floor) pre-token protocols are scored the same way. Wrapped, staked, bridged, CEX, and versioned names are excluded from ranking.
+`productUsd` rounds each factor to parts per million and multiplies in integers. Rank 1 is the largest result. Protocols that already record a token are comparables only and are not ranked. Bridges, liquid staking, restaking, CEX, and wrapped or versioned names are left off. Every watchlist slug stays.
 
 ## Run it
 
