@@ -219,3 +219,22 @@ tbody tr:hover { background: #f3e7d2; }
 .steps b { font-family: var(--serif); color: var(--wax); font-size: 18px; }
 .note { color: var(--soft); font-size: 12.5px; }
 .empty { color: var(--soft); }
+.sample { font-size: 12px; letter-spacing: 0.03em; }
+.sample.high, .badge.high { color: var(--moss); font-weight: 700; }
+.sample.fair, .badge.fair { color: var(--pine); font-weight: 650; }
+.sample.thin, .badge.thin { color: var(--soft); }
+.sample.unanchored, .badge.unanchored { color: var(--wax); }
+.badge {
+  display: inline-block;
+  margin: 0 0 0 8px;
+  padding: 3px 8px;
+  background: white;
+  border: 1px solid var(--line);
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  vertical-align: middle;
+}
+.break { width: 100%; margin: 8px 0; }
+.break th { font-size: 11px; }
+.break td { padding: 4px 10px 4px 0; }
+.break .why { color: var(--soft); font-size: 12.5px; }

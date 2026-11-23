@@ -69,6 +69,27 @@ function chainText(chains) {
   return `${chains[0]}, ${chains[1]} +${chains.length - 2}`;
 }
 
+function confidenceText(row) {
+  const n = row.comparable_count;
+  const noun = n === 1 ? "comparable" : "comparables";
+  if (row.confidence === "Unanchored") return "Unanchored · no category comparable, so the global median is used";
+  if (row.confidence === "Thin") return `Thin · ${n} ${noun} in this category, under 6, so the global median is used`;
+  return `${row.confidence} · ${n} category ${noun} set this multiple`;
+}
+
+function partials(row) {
+  const scale = 1000000n;
+  const ppms = [row.multiple_ppm, row.growth_ppm, row.age_ppm, row.chain_ppm];
+  const out = [Number(BigInt(Math.round(row.tvl_usd)))];
+  for (let i = 0; i < ppms.length; i += 1) {
+    let acc = BigInt(Math.round(row.tvl_usd));
+    for (let j = 0; j <= i; j += 1) acc *= BigInt(ppms[j]);
+    acc /= scale ** BigInt(i + 1);
+    out.push(Number(acc));
+  }
+  return out;
+}
+
 function kindText(row) {
   if (row.multiple_kind === "category") {
     return `${row.comparable_count} trading tokens in ${catName(row)} set this median`;
@@ -130,6 +151,7 @@ function compare(a, b, key) {
   if (key === "age") return (a.age_days ?? -1) - (b.age_days ?? -1);
   if (key === "chains") return a.chains.length - b.chains.length;
   if (key === "implied") return a.implied_value_usd - b.implied_value_usd;
+  if (key === "confidence") return a.comparable_count - b.comparable_count;
   return a.rank - b.rank;
 }
 
@@ -156,6 +178,7 @@ function rowHtml(row) {
     <td class="num ${changeClass(row.change_7d)}">${changeText(row.change_7d)}</td>
     <td class="num">${row.age_days == null ? "—" : `${row.age_days}d`}</td>
     <td>${esc(chainText(row.chains))}</td>
+    <td class="sample ${esc(String(row.confidence || "").toLowerCase())}">${esc(row.confidence || "—")}</td>
     <td class="implied">${compactUsd(row.implied_value_usd)}</td>
   </tr>`;
 }
@@ -194,9 +217,10 @@ function paintBoard() {
         ${headBtn("change", "7d", "right")}
         ${headBtn("age", "Age", "right")}
         ${headBtn("chains", "Chains")}
+        ${headBtn("confidence", "Confidence")}
         ${headBtn("implied", "Implied", "right")}
       </tr></thead>
-      <tbody id="rows">${rows.map(rowHtml).join("") || `<tr><td colspan="8" class="empty">No protocol matches this filter.</td></tr>`}</tbody>
+      <tbody id="rows">${rows.map(rowHtml).join("") || `<tr><td colspan="9" class="empty">No protocol matches this filter.</td></tr>`}</tbody>
     </table>`;
   const cat = document.getElementById("cat");
   const chain = document.getElementById("chain");
@@ -206,24 +230,44 @@ function paintBoard() {
 
 function paintDetail(row) {
   const check = productUsd(row.tvl_usd, row.multiple_ppm, row.growth_ppm, row.age_ppm, row.chain_ppm);
-  const bits = [
-    ["TVL", compactUsd(row.tvl_usd)],
-    ["Multiple", ppmToDecimal(row.multiple_ppm)],
-    ["Growth", ppmToDecimal(row.growth_ppm)],
-    ["Age", ppmToDecimal(row.age_ppm)],
-    ["Chains", ppmToDecimal(row.chain_ppm)],
+  const dollars = partials(row);
+  const extra = Math.max(0, row.chains.length - 1);
+  const notes = [
+    "starting TVL",
+    row.multiple_kind === "category" ? `${catName(row)} median` : "global median",
+    row.change_7d == null ? "7-day change unreported" : `${changeText(row.change_7d)} over 7 days`,
+    row.age_days == null ? "listing date unreported" : `${row.age_days} days listed`,
+    extra === 0 ? `${row.chains.length || 0} chain` : `${row.chains.length} chains, ${Math.min(12, extra)} extra counted`,
   ];
-  const eq = bits.map((bit, i) => `${i ? '<span class="op">×</span>' : ""}<div><strong>${esc(bit[1])}</strong><em>${bit[0]}</em></div>`).join("");
+  const figures = [
+    compactUsd(row.tvl_usd),
+    ppmToDecimal(row.multiple_ppm),
+    ppmToDecimal(row.growth_ppm),
+    ppmToDecimal(row.age_ppm),
+    ppmToDecimal(row.chain_ppm),
+  ];
+  const labels = ["TVL", "Category multiple", "Growth", "Age", "Chains"];
+  const breakdown = labels.map((label, i) => `<tr>
+      <td>${label}</td>
+      <td class="num">${esc(figures[i])}</td>
+      <td class="why">${esc(notes[i])}</td>
+      <td class="num">${compactUsd(dollars[i])}</td>
+    </tr>`).join("");
   const steps = row.farm_steps.map((step, i) => `<li><b>${i + 1}</b><span>${stepBody(step)}</span></li>`).join("");
   const watch = row.watchlist ? " · Watchlist" : "";
+  const tone = esc(String(row.confidence || "").toLowerCase());
   main.innerHTML = `<article class="detail">
     <button type="button" class="back" data-back="1">Back to board</button>
     <p class="kicker">${esc(catName(row))}${watch} · rank ${row.rank}</p>
     <h2>${esc(row.name)}</h2>
-    <p class="status">No token recorded</p>
+    <p class="status">No token recorded</p><p class="badge ${tone}">${esc(confidenceText(row))}</p>
     <p class="big">${compactUsd(row.implied_value_usd)}<span>Implied value · productUsd $${group(check)}</span></p>
-    <div class="eq">${eq}<span class="op">=</span><div><strong>${compactUsd(check)}</strong><em>Implied</em></div></div>
-    <p class="note">${esc(kindText(row))}. Factors are parts per million. productUsd multiplies them by TVL with integer division.</p>
+    <h3>Value breakdown</h3>
+    <table class="break">
+      <thead><tr><th>Factor</th><th class="right">Figure</th><th>Why</th><th class="right">Running</th></tr></thead>
+      <tbody>${breakdown}</tbody>
+    </table>
+    <p class="note">${esc(kindText(row))}. productUsd multiplies TVL, the category multiple, growth, age and chains in integers. The last running value is the implied value.</p>
     <div class="meta">
       <div><span>TVL</span><strong>$${group(row.tvl_usd)}</strong></div>
       <div><span>7-day</span><strong class="${changeClass(row.change_7d)}">${changeText(row.change_7d)}</strong></div>

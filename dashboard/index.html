@@ -23,10 +23,10 @@
 <div class="layout">
   <aside class="method" id="method">
     <h2>How we value</h2>
-    <p class="formula">TVL × multiple × growth × age × chains</p>
+    <p class="formula">TVL × category multiple × growth × age × chains</p>
     <dl>
       <div>
-        <dt>Multiple</dt>
+        <dt>Category multiple</dt>
         <dd>Median market cap ÷ TVL when at least 6 tokens in that category already trade. Each ratio is clamped to the 10th–90th percentile of all comparables first. Fewer than 6, and the multiple is the global median. The thin sample is shown and not used.</dd>
       </div>
       <div>
@@ -40,6 +40,10 @@
       <div>
         <dt>Chains</dt>
         <dd>1 + 0.03 × extra chains, capped at 12 extra chains.</dd>
+      </div>
+      <div>
+        <dt>Confidence</dt>
+        <dd>High at 12 or more category comparables, Fair from 6 to 11, Thin when the category has 1 to 5 and the global median is used, Unanchored when that category has none.</dd>
       </div>
     </dl>
     <p class="fine">productUsd rounds each factor to parts per million, multiplies by TVL, and divides in integers. Rank 1 is the largest result. Tokens that already trade set the multiples and are not ranked. Bridges, liquid staking, restaking, CEX, and wrapped or versioned names are left off. Every watchlist slug stays.</p>
