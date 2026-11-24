@@ -3,58 +3,100 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Fathom — pre-token launch radar</title>
+<title>Fathom v3 — Token Launch Radar</title>
 <link rel="stylesheet" href="app.css">
 </head>
 <body>
 <header class="mast">
   <div class="brand">
-    <span class="seal" aria-hidden="true"></span>
+    <div class="radar-glyph" aria-hidden="true"></div>
     <div>
-      <p class="word">Fathom</p>
-      <p class="tag">Implied value if this record held, and how to farm it</p>
+      <h1 class="word">Fathom <span class="version-tag">v3</span></h1>
+      <p class="tag">Pre-token valuation radar &amp; chain-native farming plans</p>
     </div>
   </div>
   <div class="mast-meta">
-    <p>Snapshot <strong id="asof">—</strong></p>
-    <p id="cover">Watchlist —</p>
+    <div class="meta-pill"><span class="meta-label">Snapshot</span> <strong id="asof">—</strong></div>
+    <div class="meta-pill"><span class="meta-label">Watchlist</span> <strong id="cover">40 of 40</strong></div>
   </div>
 </header>
+
 <div class="layout">
-  <aside class="method" id="method">
-    <h2>How we value</h2>
-    <p class="formula">TVL × category multiple × growth × age × chains</p>
-    <dl>
-      <div>
-        <dt>Category multiple</dt>
-        <dd>Median market cap ÷ TVL when at least 6 tokens in that category already trade. Each ratio is clamped to the 10th–90th percentile of all comparables first. Fewer than 6, and the multiple is the global median. The thin sample is shown and not used.</dd>
+  <aside class="method" id="method" aria-label="Valuation Methodology">
+    <div class="method-header">
+      <h2>How We Value</h2>
+      <span class="method-badge">Model v3</span>
+    </div>
+
+    <div class="formula-box">
+      <div class="formula-title">Valuation Identity</div>
+      <div class="formula-code">TVL × Multiple × Growth × Age × Chains</div>
+    </div>
+
+    <div class="method-sections">
+      <div class="method-card">
+        <div class="card-title">
+          <span class="step-num">1</span>
+          <h3>Category Multiple</h3>
+        </div>
+        <p>Median Market Cap ÷ TVL of live peers in the same category, Winsorized at P10–P90. A category median requires at least <strong>6 trading comps</strong>. Below 6, the global market median is used to prevent thin-sample distortions.</p>
       </div>
-      <div>
-        <dt>Growth</dt>
-        <dd>1 + 0.006 × the 7-day TVL change in percent, clamped to −20 and +35. A missing change stays 1.</dd>
+
+      <div class="method-card">
+        <div class="card-title">
+          <span class="step-num">2</span>
+          <h3>TVL Growth Modifier</h3>
+        </div>
+        <p>Momentum factor: <code>1 + 0.006 × Δ7d%</code>, clamped between -20% and +35% (+/-12% to +21% adjustment). Missing historical change defaults to 1.000.</p>
       </div>
-      <div>
-        <dt>Age</dt>
-        <dd>0.68 + 0.42 × (1 − exp(−years / 1.5)). Years are days from listed_at to the snapshot, divided by 365. A missing date uses 0.75.</dd>
+
+      <div class="method-card">
+        <div class="card-title">
+          <span class="step-num">3</span>
+          <h3>Protocol Seasoning</h3>
+        </div>
+        <p>Asymptotic maturity curve: <code>0.68 + 0.42 × (1 - e<sup>-t/1.5</sup>)</code>, where t is operational years from listing date. Unreported listing dates receive a baseline 0.750 factor.</p>
       </div>
-      <div>
-        <dt>Chains</dt>
-        <dd>1 + 0.03 × extra chains, capped at 12 extra chains.</dd>
+
+      <div class="method-card">
+        <div class="card-title">
+          <span class="step-num">4</span>
+          <h3>Multichain Breadth</h3>
+        </div>
+        <p>Cross-network distribution factor: <code>1 + 0.03 × extra_chains</code>, capped at 12 extra chains (+36% maximum expansion bonus).</p>
       </div>
-      <div>
-        <dt>Confidence</dt>
-        <dd>High at 12 or more category comparables, Fair from 6 to 11, Thin when the category has 1 to 5 and the global median is used, Unanchored when that category has none.</dd>
+
+      <div class="method-card">
+        <div class="card-title">
+          <span class="step-num">5</span>
+          <h3>Confidence Tiers</h3>
+        </div>
+        <ul class="tier-list">
+          <li><span class="badge high">High</span> &ge; 12 category peers anchor multiple</li>
+          <li><span class="badge fair">Fair</span> 6 to 11 category peers anchor multiple</li>
+          <li><span class="badge thin">Thin</span> 1 to 5 peers; global median fallback</li>
+          <li><span class="badge unanchored">Unanchored</span> 0 peers; global median fallback</li>
+        </ul>
       </div>
-    </dl>
-    <p class="fine">productUsd rounds each factor to parts per million, multiplies by TVL, and divides in integers. Rank 1 is the largest result. Tokens that already trade set the multiples and are not ranked. Bridges, liquid staking, restaking, CEX, and wrapped or versioned names are left off. Every watchlist slug stays.</p>
-    <h3>Comparables</h3>
-    <p class="fine" id="global-line">Trading tokens are not rows on this board.</p>
-    <div id="multiples"></div>
+    </div>
+
+    <div class="comps-summary">
+      <div class="comps-header">
+        <h3>Market Comparables</h3>
+        <span class="comps-count" id="global-count">—</span>
+      </div>
+      <p class="fine" id="global-line">Trading tokens establish baseline valuation multiples and are never ranked on this board.</p>
+      <div id="multiples"></div>
+    </div>
   </aside>
+
   <main id="main">
-    <p class="empty">Loading the board from the file beside this page.</p>
+    <div class="loading-state">
+      <p class="empty">Initializing launch radar from snapshot data...</p>
+    </div>
   </main>
 </div>
+
 <script src="../data.js"></script>
 <script src="app.js"></script>
 </body>

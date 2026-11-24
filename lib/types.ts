@@ -1,4 +1,5 @@
-// Shared shapes for the v2 radar. The snapshot fields are the sealed DefiLlama record.
+// Fathom v3: Core domain types for protocol valuation, farm routing, and radar dashboard.
+// Protocol records represent sealed DefiLlama snapshots.
 
 export interface Protocol {
   slug: string;
@@ -37,9 +38,9 @@ export interface LaunchRow {
   growth_ppm: number;
   age_ppm: number;
   chain_ppm: number;
-  multiple_kind: string;
+  multiple_kind: "category" | "global";
   comparable_count: number;
-  confidence: string;
+  confidence: "High" | "Fair" | "Thin" | "Unanchored";
   farm_steps: string[];
 }
 
@@ -49,7 +50,7 @@ export interface CategoryMultiple {
   n_comps: number;
   multiple_ppm: number;
   raw_ppm: number;
-  kind: string;
+  kind: "category" | "global";
 }
 
 export interface CompRow {

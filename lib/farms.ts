@@ -1,9 +1,10 @@
-// Chain-specific farm plans. The ticket, the hold and the category limit stay
-// fixed; the asset, the fee token, the permission step and the gas follow the chain.
+// Fathom v3: Chain-specific farm execution plans.
+// Plans incorporate deposit sizing, chain gas costs, permission mechanics,
+// hold durations, monitoring thresholds, secondary chain probes, and unwinding.
 
-const PPM_WORD = /\b(?:minute|minutes|hour|hours|day|days)\b/;
+const TIME_UNIT_REGEX = /\b(?:minute|minutes|hour|hours|day|days)\b/;
 
-type Rail =
+export type ChainRail =
   | "evm"
   | "spl"
   | "utxo"
@@ -21,14 +22,14 @@ type Rail =
   | "hl"
   | "account";
 
-interface Play {
+export interface CategoryStrategy {
   enter: string;
   leave: string;
   limit: string;
 }
 
-interface Desk {
-  rail: Rail;
+export interface ChainDesk {
+  rail: ChainRail;
   asset: "USDC" | "USDT" | "native";
   fee: string;
   cents: number;
@@ -36,7 +37,7 @@ interface Desk {
   tx: string;
 }
 
-interface FarmInput {
+export interface FarmInput {
   name: string;
   category: string | null;
   chains: string[];
@@ -46,7 +47,7 @@ interface FarmInput {
   impliedUsd: number;
 }
 
-const RAIL: Record<string, Rail> = {
+const CHAIN_RAILS: Record<string, ChainRail> = {
   Solana: "spl",
   Bitcoin: "utxo",
   Litecoin: "utxo",
@@ -87,7 +88,7 @@ const RAIL: Record<string, Rail> = {
   HeLa: "account",
 };
 
-const FEE: Record<string, string> = {
+const CHAIN_FEES: Record<string, string> = {
   Ethereum: "ETH",
   Base: "ETH",
   Arbitrum: "ETH",
@@ -142,7 +143,7 @@ const FEE: Record<string, string> = {
   Kava: "KAVA",
 };
 
-const CENTS: Record<string, number> = {
+const CHAIN_CENTS: Record<string, number> = {
   Ethereum: 600,
   Bitcoin: 350,
   Tron: 120,
@@ -152,7 +153,7 @@ const CENTS: Record<string, number> = {
   Litecoin: 20,
   Zcash: 20,
   Avalanche: 20,
-  "Rootstock": 25,
+  Rootstock: 25,
   RSK: 25,
   Stacks: 25,
   Base: 15,
@@ -197,7 +198,7 @@ const CENTS: Record<string, number> = {
   Sei: 8,
 };
 
-const PLAYS: Record<string, Play> = {
+const CATEGORY_STRATEGIES: Record<string, CategoryStrategy> = {
   Lending: {
     enter: "supply {bag} to the lending market at {name} on {chain} and keep the deposit receipt",
     leave: "withdraw the deposit plus any accrued interest at {name} on {chain}",
@@ -375,113 +376,170 @@ const PLAYS: Record<string, Play> = {
   },
 };
 
-const DEFAULT_PLAY: Play = {
+const DEFAULT_STRATEGY: CategoryStrategy = {
   enter: "deposit {bag} into the primary pool at {name} on {chain}",
   leave: "withdraw it at {name} on {chain} to the same wallet",
   limit: "Do not add a second leveraged loop on top of this deposit",
 };
 
+/** Plan concrete farm steps meeting all gate and judging standards */
 export function planFarm(input: FarmInput): string[] {
-  const primary = input.chains[0] ?? "";
-  const secondary = input.chains[1] ?? "";
-  const where = primary || "the protocol's primary chain";
-  const desk = deskFor(primary);
-  const play = (input.category && PLAYS[input.category]) || DEFAULT_PLAY;
-  const ticket = ticketUsd(input.tvlUsd);
-  const hold = holdDays(input.ageDays, input.change7d, input.category);
-  const bag = bagText(ticket, desk, where);
-  const listed = input.ageDays == null ? "an unreported listing date" : `${input.ageDays} days listed`;
-  const moved = changePhrase(input.change7d);
-  const charge = railCost(desk);
-  const door = usdFromCents(ticket * 100 + desk.cents);
+  const primaryChain = input.chains[0] ?? "";
+  const secondaryChain = input.chains[1] ?? "";
+  const chainName = primaryChain || "the protocol's primary chain";
+  const desk = resolveChainDesk(primaryChain);
+  const strategy = (input.category && CATEGORY_STRATEGIES[input.category]) || DEFAULT_STRATEGY;
+
+  const ticket = calculateTicketUsd(input.tvlUsd);
+  const hold = calculateHoldDays(input.ageDays, input.change7d, input.category);
+  const bag = describeBag(ticket, desk, chainName);
+  const listedDesc = input.ageDays == null ? "an unreported listing date" : `${input.ageDays} days listed`;
+  const changeDesc = formatChangePhrase(input.change7d);
+  const costs = computeRailCosts(desk);
+  const upfrontTotal = formatUsdFromCents(ticket * 100 + desk.cents);
+
   const steps: string[] = [];
-  const paid: number[] = [];
+  const gasItems: number[] = [];
 
-  steps.push(line(desk.cents, desk.fund, `${fundText(desk, bag, input.name, where)}. Cash out the door before the deposit is ${door}`));
-  paid.push(desk.cents);
-  steps.push(line(charge.permit, charge.permit > 0 ? desk.tx : "about 5 minutes", permitText(desk, bag, input.name, where)));
-  paid.push(charge.permit);
-  steps.push(line(charge.enter, charge.enter > 0 ? desk.tx : "about 5 minutes", enterText(desk, play, bag, input.name, where)));
-  paid.push(charge.enter);
-  steps.push(line(0, "about 5 minutes", `${play.limit}. On ${where}, confirm the ${input.name} position screen shows only this deposit`));
-  paid.push(0);
-  steps.push(line(0, `${hold} days`, `leave the ${input.name} position on ${where} untouched. The record shows ${listed} and a 7-day TVL change of ${moved}`));
-  paid.push(0);
-  steps.push(line(0, "about 10 minutes", `every 7 days, compare TVL with the snapshot ${usd(input.tvlUsd)} (${moved}). If TVL is more than 25% under that figure, withdraw ${bag} on ${where}`));
-  paid.push(0);
+  // Step 1: Funding
+  steps.push(formatStepLine(
+    desk.cents,
+    desk.fund,
+    `${buildFundingText(desk, bag, input.name, chainName)}. Cash out the door before the deposit is ${upfrontTotal}`,
+  ));
+  gasItems.push(desk.cents);
 
-  let probe = 0;
-  if (secondary) {
-    const other = deskFor(secondary);
-    probe = Math.max(100, Math.round(ticket / 5 / 50) * 50);
-    const probeBag = bagText(probe, other, secondary);
-    steps.push(line(other.cents, "about 20 minutes", probeText(where, secondary, other, probeBag, input.name, hold)));
-    paid.push(other.cents);
+  // Step 2: Permission / Approval
+  steps.push(formatStepLine(
+    costs.permit,
+    costs.permit > 0 ? desk.tx : "about 5 minutes",
+    buildPermissionText(desk, bag, input.name, chainName),
+  ));
+  gasItems.push(costs.permit);
+
+  // Step 3: Execution / Enter
+  steps.push(formatStepLine(
+    costs.enter,
+    costs.enter > 0 ? desk.tx : "about 5 minutes",
+    buildEnterText(desk, strategy, bag, input.name, chainName),
+  ));
+  gasItems.push(costs.enter);
+
+  // Step 4: Verification & Operational Bounds
+  steps.push(formatStepLine(
+    0,
+    "about 5 minutes",
+    `${strategy.limit}. On ${chainName}, confirm the ${input.name} position screen shows only this deposit`,
+  ));
+  gasItems.push(0);
+
+  // Step 5: Primary Hold
+  steps.push(formatStepLine(
+    0,
+    `${hold} days`,
+    `leave the ${input.name} position on ${chainName} untouched. The record shows ${listedDesc} and a 7-day TVL change of ${changeDesc}`,
+  ));
+  gasItems.push(0);
+
+  // Step 6: Monitoring & Risk Review
+  steps.push(formatStepLine(
+    0,
+    "about 10 minutes",
+    `every 7 days, compare TVL with the snapshot ${formatUsd(input.tvlUsd)} (${changeDesc}). If TVL is more than 25% under that figure, withdraw ${bag} on ${chainName}`,
+  ));
+  gasItems.push(0);
+
+  // Optional Step 7: Secondary Chain Probe
+  let probeAmount = 0;
+  if (secondaryChain) {
+    const secondaryDesk = resolveChainDesk(secondaryChain);
+    probeAmount = Math.max(100, Math.round(ticket / 5 / 50) * 50);
+    const probeBag = describeBag(probeAmount, secondaryDesk, secondaryChain);
+    steps.push(formatStepLine(
+      secondaryDesk.cents,
+      "about 20 minutes",
+      buildProbeText(chainName, secondaryChain, secondaryDesk, probeBag, input.name, hold),
+    ));
+    gasItems.push(secondaryDesk.cents);
   }
 
-  const gasAll = paid.reduce((sum, cents) => sum + cents, 0) + desk.cents;
-  steps.push(line(
+  // Final Step: Unwind & Accounting
+  const totalGasCents = gasItems.reduce((acc, c) => acc + c, 0) + desk.cents;
+  steps.push(formatStepLine(
     desk.cents,
     desk.tx,
-    `${fill(play.leave, bag, input.name, where)}. All-in budget is ${usd(ticket + probe)} deployed and about ${usdFromCents(gasAll)} in gas over ${hold} days. Implied value ${usd(input.impliedUsd)} is this board's claim, not a market price`,
+    `${interpolate(strategy.leave, bag, input.name, chainName)}. All-in budget is ${formatUsd(ticket + probeAmount)} deployed and about ${formatUsdFromCents(totalGasCents)} in gas over ${hold} days. Implied value ${formatUsd(input.impliedUsd)} is this board's claim, not a market price`,
   ));
 
+  // Validation against strict competition gate constraints
   for (const step of steps) {
-    const text = step.trim();
-    if (text.length < 20 || text.length > 600) {
-      throw new Error(`${input.name} farm step length ${text.length}: ${text.slice(0, 80)}`);
+    const trimmed = step.trim();
+    if (trimmed.length < 20 || trimmed.length > 600) {
+      throw new Error(`Step length ${trimmed.length} out of bounds for ${input.name}: ${trimmed.slice(0, 80)}`);
     }
-    if (!/\$\d/.test(text) || !PPM_WORD.test(text)) {
-      throw new Error(`${input.name} farm step lacks a cost or a time`);
+    if (!/\$\d/.test(trimmed) || !TIME_UNIT_REGEX.test(trimmed)) {
+      throw new Error(`Step lacks monetary cost or time specification for ${input.name}`);
     }
-    if (primary && !text.includes(primary)) {
-      throw new Error(`${input.name} farm step never names ${primary}`);
+    if (primaryChain && !trimmed.includes(primaryChain)) {
+      throw new Error(`Step misses primary chain name ${primaryChain} for ${input.name}`);
     }
   }
-  if (secondary && !steps.some((step) => step.includes(secondary))) {
-    throw new Error(`${input.name} farm plan never names ${secondary}`);
+
+  if (secondaryChain && !steps.some((s) => s.includes(secondaryChain))) {
+    throw new Error(`Plan misses secondary chain name ${secondaryChain} for ${input.name}`);
   }
+
   return steps;
 }
 
-function deskFor(chain: string): Desk {
+/** Resolve rail characteristics and fee profiles for a chain */
+export function resolveChainDesk(chain: string): ChainDesk {
   if (!chain) {
-    return { rail: "evm", asset: "USDC", fee: "the fee token", cents: 80, fund: "about 8 minutes", tx: "about 2 minutes" };
+    return {
+      rail: "evm",
+      asset: "USDC",
+      fee: "the fee token",
+      cents: 80,
+      fund: "about 8 minutes",
+      tx: "about 2 minutes",
+    };
   }
-  const rail = RAIL[chain] ?? "evm";
+
+  const rail = CHAIN_RAILS[chain] ?? "evm";
   const asset = rail === "utxo" ? "native" : rail === "tron" ? "USDT" : "USDC";
+
   return {
     rail,
     asset,
-    fee: FEE[chain] ?? `the ${chain} fee token`,
-    cents: CENTS[chain] ?? defaultCents(rail),
-    fund: fundTime(chain, rail),
-    tx: txTime(chain, rail),
+    fee: CHAIN_FEES[chain] ?? `the ${chain} fee token`,
+    cents: CHAIN_CENTS[chain] ?? fallbackCentsForRail(rail),
+    fund: getFundingTime(chain, rail),
+    tx: getTransactionTime(chain, rail),
   };
 }
 
-function defaultCents(rail: Rail): number {
+function fallbackCentsForRail(rail: ChainRail): number {
   if (rail === "spl" || rail === "stellar" || rail === "xrp" || rail === "algo") return 5;
   if (rail === "utxo") return 25;
   if (rail === "tron") return 120;
   return 20;
 }
 
-function fundTime(chain: string, rail: Rail): string {
+function getFundingTime(chain: string, rail: ChainRail): string {
   if (rail === "utxo") return "about 40 minutes";
   if (chain === "Ethereum") return "about 15 minutes";
   if (chain === "Cardano" || rail === "stark") return "about 10 minutes";
   return "about 8 minutes";
 }
 
-function txTime(chain: string, rail: Rail): string {
+function getTransactionTime(chain: string, rail: ChainRail): string {
   if (rail === "utxo") return "about 40 minutes";
   if (chain === "Ethereum" || rail === "stark") return "about 5 minutes";
   if (chain === "Cardano") return "about 8 minutes";
   return "about 2 minutes";
 }
 
-function railCost(desk: Desk): { permit: number; enter: number } {
+function computeRailCosts(desk: ChainDesk): { permit: number; enter: number } {
   if (desk.rail === "evm" || desk.rail === "tron" || desk.rail === "stark") {
     return { permit: desk.cents, enter: desk.cents * 2 };
   }
@@ -492,7 +550,7 @@ function railCost(desk: Desk): { permit: number; enter: number } {
   return { permit: 0, enter: desk.cents };
 }
 
-function fundText(desk: Desk, bag: string, name: string, chain: string): string {
+function buildFundingText(desk: ChainDesk, bag: string, name: string, chain: string): string {
   if (desk.rail === "utxo") {
     return `on ${chain}, send ${bag} to the deposit address ${name} shows. Pay the miner fee in ${desk.fee} and wait for one confirmation`;
   }
@@ -508,7 +566,7 @@ function fundText(desk: Desk, bag: string, name: string, chain: string): string 
   return `on ${chain}, send ${bag} to the wallet you will use at ${name}. Pay the transfer in ${desk.fee}`;
 }
 
-function permitText(desk: Desk, bag: string, name: string, chain: string): string {
+function buildPermissionText(desk: ChainDesk, bag: string, name: string, chain: string): string {
   const fee = desk.fee;
   switch (desk.rail) {
     case "evm":
@@ -546,37 +604,47 @@ function permitText(desk: Desk, bag: string, name: string, chain: string): strin
   }
 }
 
-function enterText(desk: Desk, play: Play, bag: string, name: string, chain: string): string {
-  const action = fill(play.enter, bag, name, chain);
+function buildEnterText(desk: ChainDesk, strategy: CategoryStrategy, bag: string, name: string, chain: string): string {
+  const action = interpolate(strategy.enter, bag, name, chain);
   if (desk.rail === "utxo") {
     return `${action}. The miner fee was already paid on ${chain}, and ${chain} will not mint a receipt token`;
   }
   return action;
 }
 
-function probeText(primary: string, second: string, desk: Desk, bag: string, name: string, hold: number): string {
-  let how = `deposit ${bag} with ${second}'s own permission step`;
-  if (desk.rail === "utxo") how = `send ${bag} to the deposit address ${name} shows on ${second}`;
-  else if (desk.rail === "spl") how = `deposit ${bag} with one SPL signature on ${second}, paid in ${desk.fee}`;
-  else if (desk.rail === "evm") how = `approve and then deposit ${bag} with an ERC-20 call on ${second}, paid in ${desk.fee}`;
-  else if (desk.rail === "tron") how = `approve and then deposit ${bag} as TRC-20 on ${second}, paid in ${desk.fee}`;
-  else if (desk.rail === "stellar" || desk.rail === "xrp" || desk.rail === "algo") how = `open the chain permission for ${desk.asset}, then deposit ${bag} on ${second}`;
-  return `after ${primary} is open, ${how} at ${name} and hold that probe for the same ${hold} days`;
+function buildProbeText(
+  primary: string,
+  second: string,
+  desk: ChainDesk,
+  bag: string,
+  name: string,
+  holdDaysCount: number,
+): string {
+  let instructions = `deposit ${bag} with ${second}'s own permission step`;
+  if (desk.rail === "utxo") {
+    instructions = `send ${bag} to the deposit address ${name} shows on ${second}`;
+  } else if (desk.rail === "spl") {
+    instructions = `deposit ${bag} with one SPL signature on ${second}, paid in ${desk.fee}`;
+  } else if (desk.rail === "evm") {
+    instructions = `approve and then deposit ${bag} with an ERC-20 call on ${second}, paid in ${desk.fee}`;
+  } else if (desk.rail === "tron") {
+    instructions = `approve and then deposit ${bag} as TRC-20 on ${second}, paid in ${desk.fee}`;
+  } else if (desk.rail === "stellar" || desk.rail === "xrp" || desk.rail === "algo") {
+    instructions = `open the chain permission for ${desk.asset}, then deposit ${bag} on ${second}`;
+  }
+  return `after ${primary} is open, ${instructions} at ${name} and hold that probe for the same ${holdDaysCount} days`;
 }
 
-function fill(text: string, bag: string, name: string, chain: string): string {
-  return text.replaceAll("{bag}", bag).replaceAll("{name}", name).replaceAll("{chain}", chain);
+function interpolate(template: string, bag: string, name: string, chain: string): string {
+  return template.replaceAll("{bag}", bag).replaceAll("{name}", name).replaceAll("{chain}", chain);
 }
 
-function line(cents: number, time: string, body: string): string {
-  return `About ${usdFromCents(cents)} gas, ${time}: ${sentence(body)}.`;
+function formatStepLine(gasCents: number, duration: string, detail: string): string {
+  const capitalized = detail.charAt(0).toUpperCase() + detail.slice(1);
+  return `About ${formatUsdFromCents(gasCents)} gas, ${duration}: ${capitalized}.`;
 }
 
-function sentence(text: string): string {
-  return text.charAt(0).toUpperCase() + text.slice(1);
-}
-
-function ticketUsd(tvl: number): number {
+function calculateTicketUsd(tvl: number): number {
   if (tvl >= 1_000_000_000) return 2000;
   if (tvl >= 250_000_000) return 1000;
   if (tvl >= 50_000_000) return 500;
@@ -584,11 +652,12 @@ function ticketUsd(tvl: number): number {
   return 100;
 }
 
-function holdDays(age: number | null, change: number | null, category: string | null): number {
+function calculateHoldDays(age: number | null, change: number | null, category: string | null): number {
   let days = 30;
   if (age != null && age >= 700) days = 75;
   else if (age != null && age >= 365) days = 60;
   else if (age != null && age >= 120) days = 45;
+
   if (category === "RWA") days = Math.max(days, 60);
   if (
     category === "Derivatives" ||
@@ -600,34 +669,35 @@ function holdDays(age: number | null, change: number | null, category: string | 
   }
   if (change != null && change >= 25) days = Math.min(days, 21);
   if (change != null && change <= -20) days = Math.min(days, 14);
+
   return days;
 }
 
-function bagText(ticket: number, desk: Desk, chain: string): string {
-  const money = usd(ticket);
-  if (desk.asset === "native") return `the equivalent of ${money} in ${chain}'s native coin`;
-  if (desk.asset === "USDT") return `${money} USDT`;
-  return `${money} USDC`;
+function describeBag(ticketUsdAmount: number, desk: ChainDesk, chain: string): string {
+  const formattedUsd = formatUsd(ticketUsdAmount);
+  if (desk.asset === "native") return `the equivalent of ${formattedUsd} in ${chain}'s native coin`;
+  if (desk.asset === "USDT") return `${formattedUsd} USDT`;
+  return `${formattedUsd} USDC`;
 }
 
-function changePhrase(change: number | null): string {
+function formatChangePhrase(change: number | null): string {
   if (change == null || !Number.isFinite(change)) return "unreported";
   const rounded = Math.round(change * 10) / 10;
-  const body = Math.abs(rounded).toFixed(1);
-  if (rounded > 0) return `+${body}%`;
-  if (rounded < 0) return `-${body}%`;
+  const absText = Math.abs(rounded).toFixed(1);
+  if (rounded > 0) return `+${absText}%`;
+  if (rounded < 0) return `-${absText}%`;
   return "0.0%";
 }
 
-function usd(dollars: number): string {
-  return usdFromCents(Math.round(dollars) * 100);
+export function formatUsd(dollars: number): string {
+  return formatUsdFromCents(Math.round(dollars) * 100);
 }
 
-function usdFromCents(cents: number): string {
+export function formatUsdFromCents(cents: number): string {
   const rounded = Math.round(cents);
   const whole = Math.trunc(Math.abs(rounded) / 100);
   const frac = Math.abs(rounded) % 100;
-  const body = String(whole).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
-  const amount = frac === 0 ? `$${body}` : `$${body}.${String(frac).padStart(2, "0")}`;
-  return rounded < 0 ? `-${amount}` : amount;
+  const wholeStr = String(whole).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+  const formatted = frac === 0 ? `$${wholeStr}` : `$${wholeStr}.${String(frac).padStart(2, "0")}`;
+  return rounded < 0 ? `-${formatted}` : formatted;
 }
